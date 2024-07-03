@@ -1,12 +1,12 @@
 [submodule "extern/google-FILM"]
 	path = extern/frame_interpolation
-	url = https://github.com/google-research/frame-interpolation
+	url = https://gitee.com/liuan201128/frame-interpolation.git
 [submodule "extern/GFPGAN"]
 	path = extern/GFPGAN
-	url = https://github.com/TencentARC/GFPGAN.git
+	url = https://gitee.com/liuan201128/GFPGAN.git
 [submodule "extern/frame_interpolation"]
 	path = extern/frame_interpolation
-	url = https://github.com/google-research/frame-interpolation
+	url = https://gitee.com/liuan201128/frame-interpolation.git
 [submodule "wiki"]
 	path = wiki
-	url = https://github.com/melMass/comfy_mtb.wiki.git
+	url = https://gitee.com/liuan201128/comfy_mtb_wiki.git
