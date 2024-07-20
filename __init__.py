@@ -7,7 +7,7 @@
 #
 ###
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 import os
 
@@ -179,7 +179,7 @@ for node_class in nodes:
             node_class.DESCRIPTION = node_class.__doc__
             if MTB_EXPORT:
                 wiki_name = classname_to_wiki(class_name)
-                (wiki / "nodes" / wiki_name + ".md").write_text(
+                (wiki / "nodes" / (wiki_name + ".md")).write_text(
                     node_class.__doc__, encoding="utf-8"
                 )
 
