@@ -1,8 +1,8 @@
 import comfy.utils
 from PIL import Image
-from rembg import remove
 
 from ..utils import pil2tensor, tensor2pil
+remove = None
 
 
 class MTB_ImageRemoveBackgroundRembg:
@@ -70,6 +70,9 @@ class MTB_ImageRemoveBackgroundRembg:
         out_img = []
         out_mask = []
         out_img_on_bg = []
+        global remove
+        if remove is None:
+            from rembg import remove
 
         for img in images:
             img_rm = remove(
