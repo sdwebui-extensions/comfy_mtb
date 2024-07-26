@@ -7,7 +7,6 @@ import comfy.model_management as model_management
 import cv2
 import insightface
 import numpy as np
-import onnxruntime
 import torch
 from insightface.model_zoo.inswapper import INSwapper
 from PIL import Image
@@ -15,6 +14,7 @@ from PIL import Image
 from ..errors import ModelNotFound
 from ..log import NullWriter, mklog
 from ..utils import download_antelopev2, get_model_path, pil2tensor, tensor2pil
+onnxruntime = None
 
 # endregion
 
@@ -79,6 +79,9 @@ class MTB_LoadFaceSwapModel:
     CATEGORY = "mtb/facetools"
 
     def load_model(self, faceswap_model: str):
+        global onnxruntime
+        if onnxruntime is None:
+            import onnxruntime
         model_path = get_model_path("insightface", faceswap_model)
         if not model_path or not model_path.exists():
             raise ModelNotFound(f"{faceswap_model} ({model_path})")

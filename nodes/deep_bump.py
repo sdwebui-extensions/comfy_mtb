@@ -2,7 +2,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import onnxruntime as ort
 import torch
 from PIL import Image
 
@@ -17,8 +16,9 @@ from ..utils import (
 )
 
 # Disable MS telemetry
-ort.disable_telemetry_events()
 log = mklog(__name__)
+
+ort = None
 
 
 # - COLOR to NORMALS
@@ -68,6 +68,10 @@ def color_to_normals(
     model = get_model_path("deepbump", "deepbump256.onnx")
     if not model or not model.exists():
         raise ModelNotFound(f"deepbump ({model})")
+    global ort
+    if ort is None:
+        import onnxruntime as ort
+        ort.disable_telemetry_events()
 
     ort_session = ort.InferenceSession(model)
 

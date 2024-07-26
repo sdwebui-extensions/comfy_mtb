@@ -5,13 +5,13 @@ import comfy
 import comfy.model_management as model_management
 import comfy.utils
 import numpy as np
-import tensorflow as tf
 import torch
 from frame_interpolation.eval import interpolator, util
 
 from ..errors import ModelNotFound
 from ..log import log
 from ..utils import get_model_path
+tf = None
 
 
 class MTB_LoadFilmModel:
@@ -84,6 +84,9 @@ class MTB_FilmInterpolation:
             return (images,)
 
         # check if tensorflow GPU is available
+        global tf
+        if tf is None:
+            import tensorflow as tf
         available_gpus = tf.config.list_physical_devices("GPU")
         if not len(available_gpus):
             log.warning(
