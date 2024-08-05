@@ -832,7 +832,8 @@ const mtb_widgets = {
     //- Extending Python Nodes
     switch (nodeData.name) {
       //TODO: remove this non sense
-      case 'Get Batch From History (mtb)': {
+      case 'Get Batch From History (mtb)':
+      case 'Get Batch From History V2 (mtb)': {
         const onNodeCreated = nodeType.prototype.onNodeCreated
         nodeType.prototype.onNodeCreated = function () {
           const r = onNodeCreated ? onNodeCreated.apply(this, []) : undefined
@@ -1133,7 +1134,11 @@ const mtb_widgets = {
       case 'Stack Images (mtb)':
       case 'Concat Images (mtb)': {
         shared.setupDynamicConnections(nodeType, 'image', 'IMAGE')
-
+        break
+      }
+      case 'Audio Sequence (mtb)':
+      case 'Audio Stack (mtb)': {
+        shared.setupDynamicConnections(nodeType, 'audio', 'AUDIO')
         break
       }
       case 'Batch Float Assemble (mtb)':
@@ -1192,6 +1197,7 @@ const mtb_widgets = {
       }
 
       case 'Batch Shape (mtb)':
+      case 'Mask To Image (mtb)':
       case 'Text To Image (mtb)': {
         shared.addMenuHandler(nodeType, function (_app, options) {
           /** @type {ContextMenuItem} */
