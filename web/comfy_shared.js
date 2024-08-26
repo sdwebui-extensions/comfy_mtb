@@ -917,8 +917,8 @@ export const addDocumentation = (
       Object.assign(docElement.style, {
         transformOrigin: '0 0',
         transform: scale,
-        left: `${transform.a + transform.e}px`,
-        top: `${transform.d + transform.f}px`,
+        left: `${transform.a + rect.x + transform.e}px`,
+        top: `${transform.d + rect.y + transform.f}px`,
         width: this.docPos ? this.docPos.width : `${this.size[0] * 1.5}px`,
         height: this.docPos?.height,
       })
@@ -1049,7 +1049,41 @@ export const addDeprecation = (nodeType, reason) => {
 
 // #endregion
 
-// #region graph utilities
+// #region API / graph utilities
+export const getAPIInputs = () => {
+  const inputs = {}
+  let counter = 1
+  for (const node of getNodes(true)) {
+    const widgets = node.widgets
+
+    if (node.properties.mtb_api && node.properties.useAPI) {
+      if (node.properties.mtb_api.inputs) {
+        for (const currentName in node.properties.mtb_api.inputs) {
+          const current = node.properties.mtb_api.inputs[currentName]
+          if (current.enabled) {
+            const inputName = current.name || currentName
+            const widget = widgets.find((w) => w.name === currentName)
+            if (!widget) continue
+            if (!(inputName in inputs)) {
+              inputs[inputName] = {
+                ...current,
+                id: counter,
+                name: inputName,
+                type: current.type,
+                node_id: node.id,
+                widgets: [],
+              }
+            }
+            inputs[inputName].widgets.push(widget)
+            counter = counter + 1
+          }
+        }
+      }
+    }
+  }
+  return inputs
+}
+
 export const getNodes = (skip_unused) => {
   const nodes = []
   for (const outerNode of app.graph.computeExecutionOrder(false)) {
