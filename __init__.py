@@ -349,23 +349,24 @@ if hasattr(PromptServer, "instance"):
 
     @PromptServer.instance.routes.get("/mtb/debug")
     async def get_debug(request):
-        from . import endpoint
+        return web.json_response({"enabled": False})
+        # from . import endpoint
 
-        reload(endpoint)
-        enabled = "MTB_DEBUG" in os.environ
-        # Check if the request prefers HTML content
-        if "text/html" in request.headers.get("Accept", ""):
-            # # Return an HTML page
-            html_response = f"""
-                <h1>MTB Debug Status: {'Enabled' if enabled else 'Disabled'}</h1>
-            """
-            return web.Response(
-                text=endpoint.render_base_template("Debug", html_response),
-                content_type="text/html",
-            )
+        # reload(endpoint)
+        # enabled = "MTB_DEBUG" in os.environ
+        # # Check if the request prefers HTML content
+        # if "text/html" in request.headers.get("Accept", ""):
+        #     # # Return an HTML page
+        #     html_response = f"""
+        #         <h1>MTB Debug Status: {'Enabled' if enabled else 'Disabled'}</h1>
+        #     """
+        #     return web.Response(
+        #         text=endpoint.render_base_template("Debug", html_response),
+        #         content_type="text/html",
+        #     )
 
-        # Return JSON for other requests
-        return web.json_response({"enabled": enabled})
+        # # Return JSON for other requests
+        # return web.json_response({"enabled": enabled})
 
     @PromptServer.instance.routes.get("/mtb/actions")
     async def no_route(request):
