@@ -470,6 +470,7 @@ input_dir = Path(folder_paths.input_directory)
 styles_dir = comfy_dir / "styles"
 session_id = str(uuid.uuid4())
 # - Construct the path to the font file
+folder_paths.add_model_folder_path("fonts", "/code/ComfyUI/custom_nodes/comfy_mtb/data")
 font_path = here / "data" / "font.ttf"
 
 # - Add extern folder to path

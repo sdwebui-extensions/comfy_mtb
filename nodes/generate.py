@@ -2,6 +2,7 @@ from PIL import Image
 
 from ..log import log
 from ..utils import comfy_dir, font_path, pil2tensor
+import folder_paths
 
 # class MtbExamples:
 #     """MTB Example Images"""
@@ -142,37 +143,37 @@ by default it fallsback to a default font.
         # - we could conditionaly reload fonts there
         pass
 
-    @classmethod
-    def CACHE_FONTS(cls):
-        font_extensions = ["*.ttf", "*.otf", "*.woff", "*.woff2", "*.eot"]
-        fonts = [font_path]
+    # @classmethod
+    # def CACHE_FONTS(cls):
+    #     font_extensions = ["*.ttf", "*.otf", "*.woff", "*.woff2", "*.eot"]
+    #     fonts = [font_path]
 
-        for extension in font_extensions:
-            try:
-                if comfy_dir.exists():
-                    fonts.extend(comfy_dir.glob(f"fonts/**/{extension}"))
-                else:
-                    log.warn(f"Directory {comfy_dir} does not exist.")
-            except Exception as e:
-                log.error(f"Error during font caching: {e}")
+    #     for extension in font_extensions:
+    #         try:
+    #             if comfy_dir.exists():
+    #                 fonts.extend(comfy_dir.glob(f"fonts/**/{extension}"))
+    #             else:
+    #                 log.warn(f"Directory {comfy_dir} does not exist.")
+    #         except Exception as e:
+    #             log.error(f"Error during font caching: {e}")
 
-        for font in fonts:
-            log.debug(f"Adding font {font}")
-            MTB_TextToImage.fonts[font.stem] = font.as_posix()
+    #     for font in fonts:
+    #         log.debug(f"Adding font {font}")
+    #         MTB_TextToImage.fonts[font.stem] = font.as_posix()
 
     @classmethod
     def INPUT_TYPES(cls):
-        if not cls.fonts:
-            cls.CACHE_FONTS()
-        else:
-            log.debug(f"Using cached fonts (count: {len(cls.fonts)})")
+        # if not cls.fonts:
+        #     cls.CACHE_FONTS()
+        # else:
+        #     log.debug(f"Using cached fonts (count: {len(cls.fonts)})")
         return {
             "required": {
                 "text": (
                     "STRING",
                     {"default": "Hello world!"},
                 ),
-                "font": ((sorted(cls.fonts.keys())),),
+                "font": (folder_paths.get_filename_list("fonts"),),
                 "wrap": ("BOOLEAN", {"default": True}),
                 "trim": ("BOOLEAN", {"default": True}),
                 "line_height": (
@@ -243,7 +244,7 @@ by default it fallsback to a default font.
 
         from PIL import Image, ImageDraw, ImageFont
 
-        font_path = self.fonts[font]
+        font_path = folder_paths.get_full_path("fonts", font)
 
         text = (
             text.encode("ascii", "ignore").decode().strip() if trim else text
