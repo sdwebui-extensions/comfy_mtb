@@ -40,6 +40,7 @@ class MTB_LoadFaceAnalysisModel:
     RETURN_TYPES = ("FACE_ANALYSIS_MODEL",)
     FUNCTION = "load_model"
     CATEGORY = "mtb/facetools"
+    DEPRECATED = True
 
     def load_model(self, faceswap_model: str):
         if faceswap_model == "antelopev2":
@@ -77,6 +78,7 @@ class MTB_LoadFaceSwapModel:
     RETURN_TYPES = ("FACESWAP_MODEL",)
     FUNCTION = "load_model"
     CATEGORY = "mtb/facetools"
+    DEPRECATED = True
 
     def load_model(self, faceswap_model: str):
         global onnxruntime
@@ -129,6 +131,7 @@ class MTB_FaceSwap:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "swap"
     CATEGORY = "mtb/facetools"
+    DEPRECATED = True
 
     def swap(
         self,

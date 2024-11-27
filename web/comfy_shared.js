@@ -11,6 +11,7 @@
 /// <reference path="../types/typedefs.js" />
 
 import { app } from '../../scripts/app.js'
+import { api } from '../../scripts/api.js'
 
 // #region base utils
 
@@ -18,7 +19,7 @@ import { app } from '../../scripts/app.js'
 export function makeUUID() {
   let dt = new Date().getTime()
   const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (dt + Math.random() * 16) % 16 | 0
+    const r = ((dt + Math.random() * 16) % 16) | 0
     dt = Math.floor(dt / 16)
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
   })
@@ -260,6 +261,16 @@ export function inner_value_change(widget, val, event = undefined) {
   }
 }
 
+export const getNamedWidget = (node, ...names) => {
+  const out = {}
+
+  for (const name of names) {
+    out[name] = node.widgets.find((w) => w.name === name)
+  }
+
+  return out
+}
+
 /**
  * @param {LGraphNode} node
  * @param {LLink} link
@@ -358,15 +369,17 @@ export function getWidgetType(config) {
 
 // #region dynamic connections
 /**
- * @param {NodeType} nodeType
- * @param {str} prefix
- * @param {str | [str]} inputType
+ * @param {NodeType} nodeType The nodetype to attach the documentation to
+ * @param {str} prefix A prefix added to each dynamic inputs
+ * @param {str | [str]} inputType The datatype(s) of those dynamic inputs
  * @param {{link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}?} opts
  * @returns
  */
-
 export const setupDynamicConnections = (nodeType, prefix, inputType, opts) => {
-  infoLogger('Setting up dynamic connections for', nodeType)
+  infoLogger(
+    'Setting up dynamic connections for',
+    Object.getOwnPropertyDescriptors(nodeType).title.value,
+  )
 
   /** @type {{link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}} */
   const options = opts || {}
@@ -628,39 +641,6 @@ export const loadScript = (
   })
 }
 
-export function defineClass(className, classStyles) {
-  const styleSheets = document.styleSheets
-
-  // Helper function to check if the class exists in a style sheet
-  function classExistsInStyleSheet(styleSheet) {
-    const rules = styleSheet.rules || styleSheet.cssRules
-    for (const rule of rules) {
-      if (rule.selectorText === `.${className}`) {
-        return true
-      }
-    }
-    return false
-  }
-
-  // Check if the class is already defined in any of the style sheets
-  let classExists = false
-  for (const styleSheet of styleSheets) {
-    if (classExistsInStyleSheet(styleSheet)) {
-      classExists = true
-      break
-    }
-  }
-
-  // If the class doesn't exist, add the new class definition to the first style sheet
-  if (!classExists) {
-    if (styleSheets[0].insertRule) {
-      styleSheets[0].insertRule(`.${className} { ${classStyles} }`, 0)
-    } else if (styleSheets[0].addRule) {
-      styleSheets[0].addRule(`.${className}`, classStyles, 0)
-    }
-  }
-}
-
 // #endregion
 
 // #region documentation widget
@@ -736,10 +716,84 @@ const create_documentation_stylesheet = () => {
     document.head.appendChild(styleTag)
   }
 }
-let documentationConverter
+let parserPromise
+const callbackQueue = []
+
+function runQueuedCallbacks() {
+  while (callbackQueue.length) {
+    const cb = callbackQueue.shift()
+    cb(window.MTB.mdParser)
+  }
+}
+
+function loadParser(shiki) {
+  if (!parserPromise) {
+    parserPromise = import(
+      shiki
+        ? '/mtb_async/mtb_markdown_plus.umd.js'
+        : '/mtb_async/mtb_markdown.umd.js'
+    )
+      .then((_module) =>
+        shiki ? MTBMarkdownPlus.getParser() : MTBMarkdown.getParser(),
+      )
+      .then((instance) => {
+        window.MTB.mdParser = instance
+        runQueuedCallbacks()
+        return instance
+      })
+      .catch((error) => {
+        console.error('Error loading the parser:', error)
+      })
+  }
+  return parserPromise
+}
+
+export const ensureMarkdownParser = async (callback) => {
+  infoLogger('Ensuring md parser')
+  let use_shiki = false
+  try {
+    use_shiki = await api.getSetting('mtb.Use Shiki')
+  } catch (e) {
+    console.warn('Option not available yet', e)
+  }
+
+  if (window.MTB?.mdParser) {
+    infoLogger('Markdown parser found')
+    callback?.(window.MTB.mdParser)
+    return window.MTB.mdParser
+  }
+
+  if (!parserPromise) {
+    infoLogger('Running promise to fetch parser')
+
+    try {
+      loadParser(use_shiki) //.then(() => {
+      // callback?.(window.MTB.mdParser)
+      // })
+    } catch (error) {
+      console.error('Error loading the parser:', error)
+    }
+  } else {
+    infoLogger('A similar promise is already running, waiting for it to finish')
+  }
+  if (callback) {
+    callbackQueue.push(callback)
+  }
+
+  await parserPromise
+  await parserPromise
+
+  return window.MTB.mdParser
+}
 
 /**
- * Add documentation widget to the selected node
+ * Add documentation widget to the given node.
+ *
+ * This method will add a `docCtrl` property to the node
+ * that contains the AbortController that manages all the events
+ * defined inside it (global and instance ones) without explicit
+ * cleanup method for each.
+ *
  * @param {NodeData} nodeData
  * @param {NodeType}  nodeType
  * @param {DocumentationOptions} opts
@@ -756,25 +810,10 @@ export const addDocumentation = (
     return
   }
 
-  if (!documentationConverter) {
-    infoLogger('Initializing our mardown converter')
-    documentationConverter = new showdown.Converter({
-      tables: true,
-      strikethrough: true,
-      emoji: true,
-      ghCodeBlocks: true,
-      tasklists: true,
-      ghMentions: true,
-      smoothLivePreview: true,
-      simplifiedAutoLink: true,
-      parseImgDimensions: true,
-      openLinksInNewWindow: true,
-    })
-  }
-
   const options = opts || {}
   const iconSize = options.icon_size || 14
   const iconMargin = options.icon_margin || 4
+
   let docElement = null
   let wrapper = null
 
@@ -820,80 +859,87 @@ export const addDocumentation = (
 
       wrapper = document.createElement('div')
       wrapper.classList.add('documentation-wrapper')
-      wrapper.innerHTML = documentationConverter.makeHtml(nodeData.description)
       docElement.appendChild(wrapper)
 
-      // resize handle
-      resizeHandle = document.createElement('div')
-      resizeHandle.style.width = '0'
-      resizeHandle.style.height = '0'
-      resizeHandle.style.position = 'absolute'
-      resizeHandle.style.bottom = '0'
-      resizeHandle.style.right = '0'
+      // wrapper.innerHTML = documentationConverter.makeHtml(nodeData.description)
 
-      resizeHandle.style.cursor = 'se-resize'
-      resizeHandle.style.userSelect = 'none'
+      ensureMarkdownParser().then(() => {
+        MTB.mdParser.parse(nodeData.description).then((e) => {
+          wrapper.innerHTML = e
+          // resize handle
+          resizeHandle = document.createElement('div')
+          resizeHandle.classList.add('doc-resize-handle')
+          resizeHandle.style.width = '0'
+          resizeHandle.style.height = '0'
+          resizeHandle.style.position = 'absolute'
+          resizeHandle.style.bottom = '0'
+          resizeHandle.style.right = '0'
 
-      resizeHandle.style.borderWidth = '15px'
-      resizeHandle.style.borderStyle = 'solid'
+          resizeHandle.style.cursor = 'se-resize'
+          resizeHandle.style.userSelect = 'none'
 
-      resizeHandle.style.borderColor =
-        'transparent var(--border-color) var(--border-color) transparent'
+          resizeHandle.style.borderWidth = '15px'
+          resizeHandle.style.borderStyle = 'solid'
 
-      wrapper.appendChild(resizeHandle)
-      let isResizing = false
+          resizeHandle.style.borderColor =
+            'transparent var(--border-color) var(--border-color) transparent'
 
-      let startX
-      let startY
-      let startWidth
-      let startHeight
+          wrapper.appendChild(resizeHandle)
+          let isResizing = false
 
-      resizeHandle.addEventListener(
-        'mousedown',
-        (e) => {
-          e.stopPropagation()
-          isResizing = true
-          startX = e.clientX
-          startY = e.clientY
-          startWidth = Number.parseInt(
-            document.defaultView.getComputedStyle(docElement).width,
-            10,
+          let startX
+          let startY
+          let startWidth
+          let startHeight
+
+          resizeHandle.addEventListener(
+            'mousedown',
+            (e) => {
+              e.stopPropagation()
+              isResizing = true
+              startX = e.clientX
+              startY = e.clientY
+              startWidth = Number.parseInt(
+                document.defaultView.getComputedStyle(docElement).width,
+                10,
+              )
+              startHeight = Number.parseInt(
+                document.defaultView.getComputedStyle(docElement).height,
+                10,
+              )
+            },
+
+            { signal: this.docCtrl.signal },
           )
-          startHeight = Number.parseInt(
-            document.defaultView.getComputedStyle(docElement).height,
-            10,
+
+          document.addEventListener(
+            'mousemove',
+            (e) => {
+              if (!isResizing) return
+              const scale = app.canvas.ds.scale
+              const newWidth = startWidth + (e.clientX - startX) / scale
+              const newHeight = startHeight + (e.clientY - startY) / scale
+
+              docElement.style.width = `${newWidth}px`
+              docElement.style.height = `${newHeight}px`
+
+              this.docPos = {
+                width: `${newWidth}px`,
+                height: `${newHeight}px`,
+              }
+            },
+            { signal: this.docCtrl.signal },
           )
-        },
 
-        { signal: this.docCtrl.signal },
-      )
-
-      document.addEventListener(
-        'mousemove',
-        (e) => {
-          if (!isResizing) return
-          const scale = app.canvas.ds.scale
-          const newWidth = startWidth + (e.clientX - startX) / scale
-          const newHeight = startHeight + (e.clientY - startY) / scale
-
-          docElement.style.width = `${newWidth}px`
-          docElement.style.height = `${newHeight}px`
-
-          this.docPos = {
-            width: `${newWidth}px`,
-            height: `${newHeight}px`,
-          }
-        },
-        { signal: this.docCtrl.signal },
-      )
-
-      document.addEventListener(
-        'mouseup',
-        () => {
-          isResizing = false
-        },
-        { signal: this.docCtrl.signal },
-      )
+          document.addEventListener(
+            'mouseup',
+            () => {
+              isResizing = false
+            },
+            { signal: this.docCtrl.signal },
+          )
+        })
+      })
     } else if (!this.show_doc && docElement !== null) {
       docElement.remove()
       docElement = null
