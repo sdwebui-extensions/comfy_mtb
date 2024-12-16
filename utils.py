@@ -2,6 +2,7 @@ import contextlib
 import functools
 import importlib
 import math
+import operator
 import os
 import shlex
 import shutil
@@ -11,6 +12,7 @@ import sys
 import uuid
 from collections.abc import Callable, Sequence
 from enum import Enum
+from functools import reduce
 from pathlib import Path
 from typing import TypeVar
 
@@ -212,6 +214,37 @@ def get_server_info():
 
 
 # region MISC Utilities
+def glob_multiple(
+    path: Path, patterns: list[str], recursive: bool = False
+) -> list[Path]:
+    """Combine multiple glob patterns into a single iterator."""
+    return list(reduce(operator.or_, (set(path.glob(p)) for p in patterns)))
+
+
+def build_glob_patterns(
+    extensions: list[str], recursive: bool = False
+) -> list[str]:
+    """Build glob patterns for given extensions."""
+    prefix = "**/" if recursive else ""
+    return [f"{prefix}*.{ext}" for ext in extensions]
+
+
+class SortMode(Enum):
+    NONE = "none"
+    MODIFIED = "modified"
+    MODIFIED_REVERSE = "modified-reverse"
+    NAME = "name"
+    NAME_REVERSE = "name-reverse"
+
+    @classmethod
+    def from_str(cls, value: str | None) -> "SortMode|None":
+        if not value:
+            return None
+        try:
+            return cls(value.lower())
+        except ValueError:
+            log.warning(f"Sort mode {value} not supported")
+            return None
 
 
 # TODO: use mtb.core directly instead of copying parts here
@@ -465,8 +498,12 @@ here = Path(__file__).parent.absolute()
 # - Construct the absolute path to the ComfyUI directory
 comfy_dir = Path(folder_paths.base_path)
 models_dir = Path(folder_paths.models_dir)
+
+
+# NOTE: these aren't reliable, better call the getters each time
 output_dir = Path(folder_paths.output_directory)
 input_dir = Path(folder_paths.input_directory)
+
 styles_dir = comfy_dir / "styles"
 session_id = str(uuid.uuid4())
 # - Construct the path to the font file
@@ -591,6 +628,37 @@ def tensor2np(tensor: torch.Tensor) -> list[npt.NDArray[np.uint8]]:
             raise ValueError(f"Invalid tensor shape: {t.shape}")
 
     return handle_batch(tensor, single_tensor2np)
+
+
+def nextAvailable(path: Path | str) -> Path:
+    """
+    Find the next available path by adding a numbered suffix. (mimics comfy's version).
+
+    Args:
+        path (Path): The original path to check
+
+    Returns
+    -------
+        Path: A path that doesn't exist yet
+    """
+    path = Path(path)
+
+    if not path.is_absolute():
+        path = output_dir / path
+
+    if not path.exists():
+        return path
+
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+
+    counter = 1
+    while True:
+        new_path = parent / f"{stem}_{counter:04d}{suffix}"
+        if not new_path.exists():
+            return new_path
+        counter += 1
 
 
 def pad(img, left, right, top, bottom):
