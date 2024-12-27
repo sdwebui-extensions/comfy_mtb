@@ -1,10 +1,9 @@
 /**
+ * @module Shared utilities
  * File: comfy_shared.js
  * Project: comfy_mtb
  * Author: Mel Massadian
- *
  * Copyright (c) 2023-2024 Mel Massadian
- *
  */
 
 // Reference the shared typedefs file
@@ -372,23 +371,37 @@ export function getWidgetType(config) {
  * @param {NodeType} nodeType The nodetype to attach the documentation to
  * @param {str} prefix A prefix added to each dynamic inputs
  * @param {str | [str]} inputType The datatype(s) of those dynamic inputs
- * @param {{link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}?} opts
+ * @param {{separator?:string, start_index?:number, link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}?} [opts] Extra options
  * @returns
  */
-export const setupDynamicConnections = (nodeType, prefix, inputType, opts) => {
+export const setupDynamicConnections = (
+  nodeType,
+  prefix,
+  inputType,
+  opts = undefined,
+) => {
   infoLogger(
     'Setting up dynamic connections for',
     Object.getOwnPropertyDescriptors(nodeType).title.value,
   )
 
-  /** @type {{link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}} */
-  const options = opts || {}
+  /** @type {{separator:string, start_index:number, link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}?} */
+  const options = Object.assign(
+    {
+      separator: '_',
+      start_index: 1,
+    },
+    opts || {},
+  )
   const onNodeCreated = nodeType.prototype.onNodeCreated
   const inputList = typeof inputType === 'object'
 
   nodeType.prototype.onNodeCreated = function () {
     const r = onNodeCreated ? onNodeCreated.apply(this, []) : undefined
-    this.addInput(`${prefix}_1`, inputList ? '*' : inputType)
+    this.addInput(
+      `${prefix}${options.separator}${options.start_index}`,
+      inputList ? '*' : inputType,
+    )
     return r
   }
 
@@ -423,7 +436,7 @@ export const setupDynamicConnections = (nodeType, prefix, inputType, opts) => {
       this,
       slotIndex,
       isConnected,
-      `${prefix}_`,
+      `${prefix}${options.separator}`,
       inputType,
       options,
     )
@@ -439,7 +452,7 @@ export const setupDynamicConnections = (nodeType, prefix, inputType, opts) => {
  * @param {bool} connected - Was this event connecting or disconnecting
  * @param {string} [connectionPrefix] - The common prefix of the dynamic inputs
  * @param {string|[string]} [connectionType] - The type of the dynamic connection
- * @param {{link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}} [opts] - extra options
+ * @param {{start_index?:number, link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}} [opts] - extra options
  */
 export const dynamic_connection = (
   node,
@@ -449,13 +462,18 @@ export const dynamic_connection = (
   connectionType = '*',
   opts = undefined,
 ) => {
-  /* @type {{link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}} [opts] - extra options*/
-  const options = opts || {}
+  /* {{start_index:number, link?:LLink, ioSlot?:INodeInputSlot | INodeOutputSlot}} [opts] - extra options*/
+  const options = Object.assign(
+    {
+      start_index: 1,
+    },
+    opts || {},
+  )
 
-  if (
-    node.inputs.length > 0 &&
-    !node.inputs[index].name.startsWith(connectionPrefix)
-  ) {
+  // function to test if input is a dynamic one
+  const isDynamicInput = (inputName) => inputName.startsWith(connectionPrefix)
+
+  if (node.inputs.length > 0 && !isDynamicInput(node.inputs[index].name)) {
     return
   }
 
@@ -474,7 +492,7 @@ export const dynamic_connection = (
     const to_remove = []
     for (let n = 1; n < node.inputs.length; n++) {
       const element = node.inputs[n]
-      if (!element.link) {
+      if (!element.link && isDynamicInput(element.name)) {
         if (node.widgets) {
           const w = node.widgets.find((w) => w.name === element.name)
           if (w) {
@@ -500,14 +518,25 @@ export const dynamic_connection = (
 
     infoLogger('Cleaning inputs: making it sequential again')
     // make inputs sequential again
+    let prefixed_idx = options.start_index
     for (let i = 0; i < node.inputs.length; i++) {
-      let name = `${connectionPrefix}${i + 1}`
+      let name = ''
+      // rename only prefixed inputs
+      if (isDynamicInput(node.inputs[i].name)) {
+        // prefixed => rename and increase index
+        name = `${connectionPrefix}${prefixed_idx}`
+        prefixed_idx += 1
+      } else {
+        // not prefixed => keep same name
+        name = node.inputs[i].name
+      }
 
       if (nameArray.length > 0) {
         name = i < nameArray.length ? nameArray[i] : name
       }
 
-      node.inputs[i].label = name
+      // preserve label if it exists
+      node.inputs[i].label = node.inputs[i].label || name
       node.inputs[i].name = name
     }
   }
@@ -547,11 +576,16 @@ export const dynamic_connection = (
     if (node.inputs.length === 0) return
     // add an extra input
     if (node.inputs[node.inputs.length - 1].link !== null) {
-      const nextIndex = node.inputs.length
+      // count only the prefixed inputs
+      const nextIndex = node.inputs.reduce(
+        (acc, cur) => (isDynamicInput(cur.name) ? ++acc : acc),
+        0,
+      )
+
       const name =
         nextIndex < nameArray.length
           ? nameArray[nextIndex]
-          : `${connectionPrefix}${nextIndex + 1}`
+          : `${connectionPrefix}${nextIndex + options.start_index}`
 
       infoLogger(`Adding input ${nextIndex + 1} (${name})`)
       node.addInput(name, conType)
@@ -1095,7 +1129,33 @@ export const addDeprecation = (nodeType, reason) => {
 
 // #endregion
 
-// #region API / graph utilities
+// #region Actions API
+export const runAction = async (name, ...args) => {
+  const req = await api.fetchApi('/mtb/actions', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      args,
+    }),
+  })
+
+  const res = await req.json()
+  return res.result
+}
+export const getServerInfo = async () => {
+  const res = await api.fetchApi('/mtb/server-info')
+  return await res.json()
+}
+export const setServerInfo = async (opts) => {
+  await api.fetchApi('/mtb/server-info', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  })
+}
+
+// #endregion
+
+// #region Authoring API / graph utilities
 export const getAPIInputs = () => {
   const inputs = {}
   let counter = 1
@@ -1148,3 +1208,4 @@ export const getNodes = (skip_unused) => {
   }
   return nodes
 }
+// #endregion

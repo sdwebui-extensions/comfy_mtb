@@ -1,7 +1,7 @@
 import { app } from '../../scripts/app.js'
 import { api } from '../../scripts/api.js'
 
-// import * as shared from './comfy_shared.js'
+import * as shared from './comfy_shared.js'
 
 import {
   // defineCSSClass,
@@ -15,9 +15,11 @@ import {
 const offset = 0
 let currentWidth = 200
 let currentMode = 'input'
+let subfolder = ''
 let currentSort = 'None'
 
-const IMAGE_NODES = ['LoadImage']
+const IMAGE_NODES = ['LoadImage', 'VHS_LoadImagePath']
+const VIDEO_NODES = ['VHS_LoadVideo']
 
 const updateImage = (node, image) => {
   if (IMAGE_NODES.includes(node.type)) {
@@ -26,6 +28,13 @@ const updateImage = (node, image) => {
       w.value = image
       w.callback()
     }
+  } else if (VIDEO_NODES.includes(node.type)) {
+    const w = node.widgets?.find((w) => w.name === 'video')
+    if (w) {
+      node.updateParameters({ filename: image }, true)
+    }
+  } else {
+    console.warn('No method to update', node.type)
   }
 }
 
@@ -34,18 +43,28 @@ const getImgsFromUrls = (urls, target) => {
   if (urls === undefined) {
     return imgs
   }
+  const elem = currentMode === 'video' ? 'video' : 'img'
 
   for (const [key, url] of Object.entries(urls)) {
-    const a = makeElement('img')
+    const a = makeElement(elem)
     a.src = url
     a.width = currentWidth
     if (currentMode === 'input') {
       a.onclick = (_e) => {
+        if (subfolder !== '') {
+          app.extensionManager.toast.add({
+            severity: 'warn',
+            summary: 'Subfolder not supported',
+            detail: "The LoadImage node doesn't support subfolders",
+            life: 5000,
+          })
+          return
+        }
         const selected = app.canvas.selected_nodes
         if (selected && Object.keys(selected).length === 0) {
           app.extensionManager.toast.add({
             severity: 'warn',
-            summary: 'No LoadImage node selected!',
+            summary: 'No node selected!',
             detail:
               'For now the only action when clicking images in the sidebar is to set the image on all selected LoadImage nodes.',
             life: 5000,
@@ -57,9 +76,19 @@ const getImgsFromUrls = (urls, target) => {
           updateImage(node, key)
         }
       }
-    } else {
-      a.onclick = (_e) =>
+    } else if (currentMode === 'output') {
+      a.onclick = (_e) => {
         // window.MTB?.notify?.("Output import isn't supported yet...", 5000)
+        if (subfolder !== '') {
+          app.extensionManager.toast.add({
+            severity: 'warn',
+            summary: 'Subfolder not supported',
+            detail: "The LoadImage node doesn't support subfolders",
+            life: 5000,
+          })
+          return
+        }
+
         app.extensionManager.toast.add({
           severity: 'warn',
           summary: 'Outputs not supported',
@@ -67,6 +96,29 @@ const getImgsFromUrls = (urls, target) => {
             'For now only inputs can be clicked to load the image on the active LoadImage node.',
           life: 5000,
         })
+      }
+    } else {
+      a.autoplay = true
+
+      a.muted = true
+      a.loop = true
+      a.onclick = (_e) => {
+        const selected = app.canvas.selected_nodes
+        if (selected && Object.keys(selected).length === 0) {
+          app.extensionManager.toast.add({
+            severity: 'warn',
+            summary: 'No node selected!',
+            detail:
+              "For now the only action when clicking videos in the sidebar is to set the video on all selected 'Load Video (Upload)' nodes.",
+            life: 5000,
+          })
+          return
+        }
+
+        for (const [_id, node] of Object.entries(app.canvas.selected_nodes)) {
+          updateImage(node, key)
+        }
+      }
     }
     imgs.push(a)
   }
@@ -76,19 +128,33 @@ const getImgsFromUrls = (urls, target) => {
   return imgs
 }
 
-const getUrls = async () => {
-  const count = await api.getSetting('mtb.io-sidebar.count')
+const getModes = async () => {
+  const inputs = await shared.runAction('getUserImageFolders')
+  return inputs
+}
+const getUrls = async (subfolder) => {
+  const count = (await api.getSetting('mtb.io-sidebar.count')) || 1000
   console.log('Sidebar count', count)
-  const inputs = await api.fetchApi('/mtb/actions', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: 'getUserImages',
-      // mode, count, offset
-      args: [currentMode, count, offset, currentSort],
-    }),
-  })
-  const output = await inputs.json()
-  return output?.result || {}
+  if (currentMode === 'video') {
+    const output = await shared.runAction(
+      'getUserVideos',
+      256,
+      count,
+      offset,
+      currentSort,
+    )
+    return output || {}
+  }
+  const output = await shared.runAction(
+    'getUserImages',
+    currentMode,
+    count,
+    offset,
+    currentSort,
+    false,
+    subfolder,
+  )
+  return output || {}
 }
 
 //NOTE: do not load if using the old ui
@@ -187,21 +253,39 @@ if (window?.__COMFYUI_FRONTEND_VERSION__) {
             el.parentNode.style.overflowY = 'clip'
           }
 
-          const urls = await getUrls(currentMode)
+          const allModes = await getModes()
+          const input_modes = allModes.input.map((m) => `input - ${m}`)
+          const output_modes = allModes.output.map((m) => `output - ${m}`)
+          const urls = await getUrls()
           let imgs = {}
 
           const cont = makeElement('div.mtb_sidebar')
 
           const imgGrid = makeElement('div.mtb_img_grid')
-          const selector = makeSelect(['input', 'output'], currentMode)
+          const selector = makeSelect(
+            ['input', 'output', 'video', ...output_modes, ...input_modes],
+            currentMode,
+          )
 
           selector.addEventListener('change', async (e) => {
-            const newMode = e.target.value
-            const changed = newMode !== currentMode
+            let newMode = e.target.value
+            let changed = false
+            let newSub = ''
+            if (newMode !== 'input' && newMode !== 'output') {
+              if (newMode.startsWith('input - ')) {
+                newSub = newMode.replace('input - ', '')
+                newMode = 'input'
+              } else if (newMode.startsWith('output - ')) {
+                newSub = newMode.replace('output - ', '')
+                newMode = 'output'
+              }
+            }
+            changed = newMode !== currentMode || newSub !== subfolder
             currentMode = newMode
+            subfolder = newSub
             if (changed) {
               imgGrid.innerHTML = ''
-              const urls = await getUrls()
+              const urls = await getUrls(subfolder)
               if (urls) {
                 imgs = getImgsFromUrls(urls, imgGrid)
               }
@@ -220,7 +304,7 @@ if (window?.__COMFYUI_FRONTEND_VERSION__) {
             currentSort = newSort
             if (changed) {
               imgGrid.innerHTML = ''
-              const urls = await getUrls()
+              const urls = await getUrls(subfolder)
               if (urls) {
                 imgs = getImgsFromUrls(urls, imgGrid)
               }
@@ -229,7 +313,6 @@ if (window?.__COMFYUI_FRONTEND_VERSION__) {
 
           const sizeSlider = makeSlider(64, 1024, currentWidth, 1)
           imgTools.appendChild(orderSelect)
-
           imgTools.appendChild(sizeSlider)
 
           imgs = getImgsFromUrls(urls, imgGrid)

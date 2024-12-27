@@ -1,12 +1,14 @@
 import csv
 import secrets
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any, Literal
 
 import folder_paths
 from aiohttp import web
 
+from .install import get_node_dependencies
 from .log import mklog
 from .utils import (
     SortMode,
@@ -25,7 +27,7 @@ endlog = mklog("mtb endpoint")
 import_install("requirements")
 
 
-def ACTIONS_installDependency(dependency_names=None):
+def ACTIONS_installDependency(dependency_names: list[str] | None = None):
     if dependency_names is None:
         # return web.Response(text="No dependency name provided", status=400)
         return {"error": "No dependency name provided"}
@@ -33,6 +35,14 @@ def ACTIONS_installDependency(dependency_names=None):
     endlog.debug(f"Received Install Dependency request for {dependency_names}")
     # reqs = []
     resolved_names = [reqs_map.get(name, name) for name in dependency_names]
+    allowed_deps = list(
+        {d for dep in get_node_dependencies().values() for d in dep}
+    )
+    for dep in dependency_names:
+        if dep not in allowed_deps:
+            return {
+                "error": f"Unknown dependency: {dep}, you can only use this endpoint to install {allowed_deps}"
+            }
     try:
         run_command(
             [Path(sys.executable), "-m", "pip", "install"] + resolved_names
@@ -57,23 +67,75 @@ def ACTIONS_installDependency(dependency_names=None):
     #             break
 
 
+def ACTIONS_getUserImageFolders():
+    input_dir = Path(folder_paths.get_input_directory())
+    output_dir = Path(folder_paths.get_output_directory())
+
+    input_subdirs = [x.name for x in input_dir.iterdir() if x.is_dir()]
+    output_subdirs = [x.name for x in output_dir.iterdir() if x.is_dir()]
+
+    return {"input": input_subdirs, "output": output_subdirs}
+
+
+def ACTIONS_getUserVideos(
+    size=256, count=200, offset=0, sort: str | None = None
+):
+    count = count or 1000
+    video_extensions = ["webm", "mp4", "mkv", "mov"]
+    entries = {}
+    patterns = build_glob_patterns(video_extensions)
+    input_dir = Path(folder_paths.get_input_directory())
+    entries = glob_multiple(input_dir, patterns)
+
+    sort_mode = SortMode.from_str(sort)
+
+    if sort_mode:
+        sort_key = {
+            SortMode.MODIFIED: lambda x: x.stat().st_mtime,
+            SortMode.MODIFIED_REVERSE: lambda x: x.stat().st_mtime,
+            SortMode.NAME: lambda x: x.name,
+            SortMode.NAME_REVERSE: lambda x: x.name,
+        }.get(sort_mode)
+        if sort_key:
+            reverse = sort_mode in (SortMode.MODIFIED, SortMode.NAME_REVERSE)
+            entries = sorted(entries, key=sort_key, reverse=reverse)
+
+    videos = {
+        video.name: (
+            f"/view?force_rate=0&frame_load_cap=0&skip_first_frames=0&select_every_nth=1&filename={urllib.parse.quote_plus(video.name)}&type=input&format=video&force_size={size}x?"
+        )
+        for i, video in enumerate(entries)
+        if offset <= i < offset + count
+    }
+    return videos
+
+
 def ACTIONS_getUserImages(
     mode: Literal["input", "output"],
-    count=200,
+    count=1000,
     offset=0,
     sort: str | None = None,
     include_subfolders: bool = False,
+    subfolder=None,
 ):
     # enabled = "MTB_EXPOSE" in os.environ
     # if not enabled:
     #     return {"error": "Session not authorized to getInputs"}
 
     imgs = {}
+    count = count or 1000
 
     input_dir = Path(folder_paths.get_input_directory())
     output_dir = Path(folder_paths.get_output_directory())
 
     entry_dir = input_dir if mode == "input" else output_dir
+    if subfolder:
+        entry_dir = entry_dir / subfolder
+
+        if not entry_dir.exists():
+            return {
+                "error": f"Subfolder {entry_dir.name} doesn't exists in {entry_dir.parent.as_posix()}"
+            }
     supported = ["png", "jpg", "jpeg", "webp", "gif"]
 
     entries = {}
@@ -95,7 +157,7 @@ def ACTIONS_getUserImages(
 
     imgs = {
         img.name: (
-            f"/mtb/view?filename={img.name}&width=512&type={mode}&subfolder="
+            f"/mtb/view?filename={img.name}&width=512&type={mode}&subfolder={subfolder or ''}"
             f"{img.parent.relative_to(entry_dir) if include_subfolders else ''}"
             f"&preview=&rand={secrets.randbelow(424242)}"
         )
