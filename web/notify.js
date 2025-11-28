@@ -41,7 +41,16 @@ const toastStyle = `
     transition-duration: ${transition_time}ms;
   `
 
-function notify(message, timeout = 3000) {
+function notify(message, timeout = 3000, old_mode = false) {
+  if (!old_mode) {
+    app.extensionManager.toast.add({
+      severity: 'info',
+      summary: 'MTB',
+      detail: message,
+      life: timeout,
+    })
+    return
+  }
   log('Creating toast')
   const container = document.getElementById('mtb-notify-container')
   const toast = document.createElement('div')
@@ -59,7 +68,7 @@ function notify(message, timeout = 3000) {
       log('Transition out')
       const totalHeight = Array.from(container.children).reduce(
         (acc, child) => acc + child.offsetHeight + 10, // Add spacing of 10px between toasts
-        0
+        0,
       )
       container.style.height = `${totalHeight}px`
 
@@ -83,7 +92,7 @@ function notify(message, timeout = 3000) {
   // Update container's height to fit new toast
   const totalHeight = Array.from(container.children).reduce(
     (acc, child) => acc + child.offsetHeight + 10, // Add spacing of 10px between toasts
-    0
+    0,
   )
   container.style.height = `${totalHeight}px`
 

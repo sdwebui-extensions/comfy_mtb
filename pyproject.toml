@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfy-mtb"
-version = "0.2.1"
+version = "0.5.4"
 description = "Animation oriented nodes pack for ComfyUI."
-license = "MIT"
+license = { text = "MIT" }
 readme = "README.md"
 # repository = ""
 # url = "https://github.com/melMass/comfy_mtb"
@@ -63,7 +63,7 @@ DisplayName = "comfy-mtb"
 Icon = "https://avatars.githubusercontent.com/u/7041726?v=4"
 
 [tool.bumpversion]
-current_version = "0.2.1"
+current_version = "0.5.1"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 search = "{current_version}"
@@ -150,6 +150,9 @@ show_contexts = true
 
 [tool.ruff]
 line-length = 79
+extend-exclude = ["./docs/conf.py", "notebooks", "stubs"]
+
+[tool.ruff.lint]
 select = ["A", "B", "C", "D", "E", "F", "FBT", "I", "N", "S", "SIM", "UP", "W"]
 # NOTE:
 # D102 - undocumented-public-method (noisy)
@@ -157,16 +160,14 @@ select = ["A", "B", "C", "D", "E", "F", "FBT", "I", "N", "S", "SIM", "UP", "W"]
 # D100 - undocumented-public-module (noisy)
 # N802 - invalid-function-name (forced by comfy's arch)
 ignore = ["D103", "D102", "D100", "N802"]
-# exclude auto generated file
-extend-exclude = ["./docs/conf.py"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 # imported but unused
 "__init__.py" = ["F401"]
 # use of assert detected
 "tests/*" = ["S101"]
 
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
 [tool.mypy]

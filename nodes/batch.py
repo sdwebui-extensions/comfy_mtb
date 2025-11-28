@@ -1,13 +1,18 @@
+import os
+import random
 from io import BytesIO
+from pathlib import Path
 from typing import Literal
 
+import comfy.utils
 import cv2
+import folder_paths
 import numpy as np
 import torch
 from PIL import Image
 
 from ..log import log
-from ..utils import EASINGS, apply_easing, pil2tensor
+from ..utils import EASINGS, apply_easing, glob_multiple, pil2tensor
 from .transform import MTB_TransformImage
 
 
@@ -47,7 +52,7 @@ class MTB_BatchFloatMath:
         for v in vals:
             if len(v) != ref_count:
                 raise ValueError(
-                    f"All values must have the same length (current: {len(v)}, ref: {ref_count}"
+                    f"All values must have the same length (current: {len(v)}, ref: {ref_count})"
                 )
 
         match operation:
@@ -170,6 +175,124 @@ class MTB_BatchTimeWrap:
         return (warped_tensor, interpolated_curve)
 
 
+class MTB_ImageBatchToSublist:
+    """
+    # Image Batch To Sublist 🔄
+
+    Splits a large batched tensor into smaller sub-batches for memory-efficient processing.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "sub_batch_size": (
+                    "INT",
+                    {"default": 1, "min": 1, "max": 1000, "step": 1},
+                ),
+            },
+            "optional": {
+                "image": ("IMAGE",),
+                "mask": ("MASK",),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK", "INT")
+    RETURN_NAMES = ("image_list", "mask_list", "item_count")
+
+    OUTPUT_IS_LIST = (True, True)
+    FUNCTION = "split_batch"
+    CATEGORY = "batch_processing"
+
+    def split_batch(
+        self,
+        sub_batch_size: int,
+        image: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+    ):
+        if image is None and mask is None:
+            raise ValueError(
+                "You must either pass mask or image, none received"
+            )
+
+        image_count = 0
+        if image is not None:
+            image_count = image.size(0)
+
+        mask_count = 0
+        if mask is not None:
+            mask_count = mask.size(0)
+
+        if image_count > 0 and mask_count > 0 and mask_count != image_count:
+            raise ValueError(
+                f"When providing image and mask, batch size must match (got {mask.size(0)} mask and {image.size(0)} images)"
+            )
+
+        batch_size = max(image_count, mask_count)
+
+        num_full_batches = batch_size // sub_batch_size
+        im_batches = []
+        mask_batches = []
+
+        for i in range(num_full_batches):
+            start_idx = i * sub_batch_size
+            end_idx = start_idx + sub_batch_size
+            if image_count > 0:
+                im_batches.append(image[start_idx:end_idx, ...])
+
+            if mask_count > 0:
+                mask_batches.append(mask[start_idx:end_idx, ...])
+
+        if batch_size % sub_batch_size != 0:
+            remaining_start = num_full_batches * sub_batch_size
+            if image_count > 0:
+                im_batches.append(image[remaining_start:, ...])
+
+            if mask_count > 0:
+                mask_batches.append(mask[remaining_start:, ...])
+
+        return (im_batches, mask_batches, len(im_batches))
+
+
+class MTB_SublistToImageBatch:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "tensors": ("IMAGE",),
+            }
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "merge_batches"
+    CATEGORY = "batch_processing"
+    DOCUMENTATION = """# Sublist to Image Batch 🔄
+
+Merges a list of sub-batched tensors back into a single large batch.
+"""
+
+    def merge_batches(self, tensors: list[torch.Tensor]):
+        if len(tensors) <= 1:
+            return (tensors[0],)
+
+        result = tensors[0]
+
+        for next_tensor in tensors[1:]:
+            if result.shape[1:] != next_tensor.shape[1:]:
+                next_tensor = comfy.utils.common_upscale(
+                    next_tensor.movedim(-1, 1),
+                    result.shape[2],
+                    result.shape[1],
+                    "lanczos",
+                    "center",
+                ).movedim(1, -1)
+
+            result = torch.cat((result, next_tensor), dim=0)
+
+        return (result,)
+
+
 class MTB_BatchMake:
     """Simply duplicates the input frame as a batch"""
 
@@ -179,18 +302,22 @@ class MTB_BatchMake:
             "required": {
                 "image": ("IMAGE",),
                 "count": ("INT", {"default": 1}),
-            }
+            },
+            "optional": {"mask": ("MASK",)},
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "generate_batch"
     CATEGORY = "mtb/batch"
 
-    def generate_batch(self, image: torch.Tensor, count):
+    def generate_batch(self, image: torch.Tensor, count, mask=None):
         if len(image.shape) == 3:
             image = image.unsqueeze(0)
 
-        return (image.repeat(count, 1, 1, 1),)
+        return (
+            image.repeat(count, 1, 1, 1),
+            mask.repeat(count, 1, 1) if mask else mask,
+        )
 
 
 class MTB_BatchShape:
@@ -208,9 +335,9 @@ class MTB_BatchShape:
                 "image_width": ("INT", {"default": 512}),
                 "image_height": ("INT", {"default": 512}),
                 "shape_size": ("INT", {"default": 100}),
-                "color": ("COLOR", {"default": "#ffffff"}),
-                "bg_color": ("COLOR", {"default": "#000000"}),
-                "shade_color": ("COLOR", {"default": "#000000"}),
+                "color": ("COLOR", {"default": "#ffffff","widgetType": "MTB_COLOR"}),
+                "bg_color": ("COLOR", {"default": "#000000","widgetType": "MTB_COLOR"}),
+                "shade_color": ("COLOR", {"default": "#000000","widgetType": "MTB_COLOR"}),
                 "thickness": ("INT", {"default": 5}),
                 "shadex": ("FLOAT", {"default": 0.0}),
                 "shadey": ("FLOAT", {"default": 0.0}),
@@ -375,8 +502,14 @@ class MTB_BatchFloat:
                     {"default": "Steps"},
                 ),
                 "count": ("INT", {"default": 2}),
-                "min": ("FLOAT", {"default": 0.0, "step": 0.001}),
-                "max": ("FLOAT", {"default": 1.0, "step": 0.001}),
+                "min": (
+                    "FLOAT",
+                    {"default": 0.0, "min": -1e4, "max": 1e4, "step": 0.001},
+                ),
+                "max": (
+                    "FLOAT",
+                    {"default": 1.0, "min": -1e4, "max": 1e4, "step": 0.001},
+                ),
                 "easing": (
                     [
                         "Linear",
@@ -709,7 +842,7 @@ class MTB_Batch2dTransform:
                     ["edge", "constant", "reflect", "symmetric"],
                     {"default": "edge"},
                 ),
-                "constant_color": ("COLOR", {"default": "#000000"}),
+                "constant_color": ("COLOR", {"default": "#000000","widgetType": "MTB_COLOR"}),
             },
             "optional": {
                 "x": ("FLOATS",),
@@ -717,6 +850,13 @@ class MTB_Batch2dTransform:
                 "zoom": ("FLOATS",),
                 "angle": ("FLOATS",),
                 "shear": ("FLOATS",),
+                "use_normalized": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "If true, transform values will be scaled to image dimensions.",
+                    },
+                ),
             },
         }
 
@@ -745,6 +885,7 @@ class MTB_Batch2dTransform:
         zoom: list[float] | None = None,
         angle: list[float] | None = None,
         shear: list[float] | None = None,
+        use_normalized: bool = False,
     ):
         if all(
             self.get_num_elements(param) <= 0
@@ -796,6 +937,7 @@ class MTB_Batch2dTransform:
                 keyframes["shear"][i],
                 border_handling,
                 constant_color,
+                use_normalized=use_normalized,
             )[0]
             for i in range(image.shape[0])
         ]
@@ -1239,6 +1381,146 @@ class MTB_BatchShake:
         return (shaken_images, x_translations, y_translations, rotations)
 
 
+class MTB_BatchFromFolder:
+    """Load images from a folder with options for latest, oldest, or random selection."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "enable": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Enable or disable the node. If disabled, returns passthrough_image or an empty tensor.",
+                    },
+                ),
+                "folder_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "Path to the folder containing images. Relative paths are resolved to the ComfyUI output directory.",
+                    },
+                ),
+                "mode": (
+                    ["latest", "oldest", "random"],
+                    {
+                        "default": "latest",
+                        "tooltip": "How to select images: latest, oldest, or random.",
+                    },
+                ),
+                "count": (
+                    "INT",
+                    {
+                        "default": 10,
+                        "min": 1,
+                        "max": 1000,
+                        "tooltip": "Number of images to load from the folder.",
+                    },
+                ),
+                "filter": (
+                    "STRING",
+                    {
+                        "default": "*",
+                        "tooltip": "Glob filter for image filenames (e.g. *.png).",
+                    },
+                ),
+            },
+            "optional": {
+                "passthrough_image": (
+                    "IMAGE",
+                    {
+                        "tooltip": "If provided and node is disabled, this image is passed through instead of returning an empty tensor."
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    CATEGORY = "mtb/batch"
+    FUNCTION = "load_from_folder"
+
+    def load_from_folder(
+        self,
+        enable: bool,
+        folder_path: str,
+        mode: str,
+        count: int,
+        filter: str,
+        passthrough_image=None,
+    ):
+        """Load images from a folder with the specified selection mode."""
+        if not enable:
+            if passthrough_image is not None:
+                log.debug(
+                    "MTB_BatchFromFolder: Using passthrough image (disabled)"
+                )
+                return (passthrough_image,)
+            log.debug(
+                "MTB_BatchFromFolder: Disabled and no passthrough_image provided, returning empty tensor"
+            )
+            return (torch.zeros(0, 0, 0, 3),)
+
+        path_obj = Path(folder_path)
+        if not path_obj.is_absolute():
+            output_dir = Path(folder_paths.get_output_directory())
+            path_obj = output_dir / folder_path
+            path_obj = path_obj.resolve()
+
+        if not path_obj.exists():
+            log.error(f"Folder path does not exist: {path_obj}")
+            return (torch.zeros(0, 0, 0, 3),)
+
+        if not path_obj.is_dir():
+            log.error(f"Path is not a directory: {path_obj}")
+            return (torch.zeros(0, 0, 0, 3),)
+
+        patterns = [filter] if filter else ["*"]
+        files = glob_multiple(path_obj, patterns)
+
+        image_extensions = [".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff"]
+        image_files = [
+            f for f in files if f.suffix.lower() in image_extensions
+        ]
+
+        if not image_files:
+            log.warning(
+                f"No image files found in {path_obj} with filter {filter}"
+            )
+            return (torch.zeros(0, 0, 0, 3),)
+
+        if mode == "latest":
+            image_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+        elif mode == "oldest":
+            image_files.sort(key=lambda x: os.path.getmtime(x))
+        elif mode == "random":
+            random.shuffle(image_files)
+
+        selected_files = image_files[:count]
+
+        if len(selected_files) < count:
+            log.warning(
+                f"Requested {count} images but only found {len(selected_files)}"
+            )
+
+        loaded_images = []
+        for file_path in selected_files:
+            try:
+                img = Image.open(file_path)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                loaded_images.append(img)
+            except Exception as e:
+                log.error(f"Error loading image {file_path}: {e}")
+
+        if not loaded_images:
+            log.error("Failed to load any images")
+            return (torch.zeros(0, 0, 0, 3),)
+
+        return (pil2tensor(loaded_images),)
+
+
 __nodes__ = [
     MTB_Batch2dTransform,
     MTB_BatchFloat,
@@ -1247,6 +1529,7 @@ __nodes__ = [
     MTB_BatchFloatFit,
     MTB_BatchFloatMath,
     MTB_BatchFloatNormalize,
+    MTB_BatchFromFolder,
     MTB_BatchMake,
     MTB_BatchMerge,
     MTB_BatchSequence,
@@ -1255,4 +1538,6 @@ __nodes__ = [
     MTB_BatchShape,
     MTB_BatchTimeWrap,
     MTB_PlotBatchFloat,
+    MTB_SublistToImageBatch,
+    MTB_ImageBatchToSublist,
 ]

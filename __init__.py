@@ -3,11 +3,11 @@
 # File: __init__.py
 # Project: comfy_mtb
 # Author: Mel Massadian
-# Copyright (c) 2023 Mel Massadian
+# Copyright (c) 2023-2025 Mel Massadian
 #
 ###
 
-__version__ = "0.2.1"
+__version__ = "0.5.4"
 
 import os
 
@@ -31,7 +31,18 @@ from importlib import reload
 from pathlib import Path
 
 from aiohttp import web
-from server import PromptServer
+
+IN_COMFY = False
+
+PromptServer = None
+
+try:
+    from server import PromptServer
+
+    IN_COMFY = True
+except ModuleNotFoundError:
+    IN_COMFY = False
+
 
 from .endpoint import endlog
 from .install import get_node_dependencies
@@ -66,7 +77,7 @@ def extract_nodes_from_source(filename: Path):
                             )
                         break
     except SyntaxError:
-        log.error("Failed to parse")
+        log.error(f"Failed to parse ast from: {filename}")
     return nodes
 
 
@@ -231,9 +242,28 @@ if failed:
 # - ENDPOINT
 
 
-if hasattr(PromptServer, "instance"):
+# TODO: move that away and simplify existing endpoints
+
+
+def register_routes():
+    if not PromptServer:
+        log.error("No prompt server, are you inside comfy?")
+
+    if PromptServer.instance.app.frozen:
+        log.warning(
+            "The router is frozen and cannot be further edited."
+            "If you are hot reloading mtb this is expected."
+        )
+        return
+
     img_cache = None
     prompt_cache = None
+
+    import asyncio
+    import os
+    from io import BytesIO
+
+    from PIL import Image
 
     with contextlib.suppress(ImportError):
         from cachetools import TTLCache
@@ -351,13 +381,6 @@ if hasattr(PromptServer, "instance"):
         # Return JSON for other requests
         return web.json_response({"message": "Welcome to MTB!"})
 
-    import asyncio
-    import os
-    from io import BytesIO
-
-    from aiohttp import web
-    from PIL import Image
-
     def get_cached_image(file_path: str, preview_params=None, channel=None):
         cache_key = (file_path, preview_params, channel)
         if img_cache and (cache_key in img_cache):
@@ -464,6 +487,26 @@ if hasattr(PromptServer, "instance"):
         if not os.path.isfile(file):
             return web.Response(status=404)
 
+        ret_workflow = request.rel_url.query.get("workflow")
+
+        if ret_workflow:
+            image = Image.open(file)
+            prompt = image.info.get("prompt", "")
+            workflow = image.info.get("workflow", "")
+
+            if workflow:
+                workflow = json.loads(workflow)
+
+            if prompt:
+                prompt = json.loads(prompt)
+
+            return web.json_response(
+                {
+                    "prompt": prompt,
+                    "workflow": workflow,
+                }
+            )
+
         preview_info = None
         if "preview" in request.rel_url.query:
             preview_params = request.rel_url.query["preview"].split(";")
@@ -540,6 +583,10 @@ if hasattr(PromptServer, "instance"):
         reload(endpoint)
 
         return await endpoint.do_action(request)
+
+
+if IN_COMFY and hasattr(PromptServer, "instance"):
+    register_routes()
 
 
 # - WAS Dictionary

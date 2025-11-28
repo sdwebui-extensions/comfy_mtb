@@ -1,6 +1,9 @@
+/// <reference path="../types/typedefs.js" />
+
 import { app } from '../../scripts/app.js'
 import { api } from '../../scripts/api.js'
 
+import * as mtb_ui from './mtb_ui.js'
 import * as shared from './comfy_shared.js'
 
 import {
@@ -13,13 +16,20 @@ import {
 } from './mtb_ui.js'
 
 const offset = 0
+
+// These are "global" variables mostly meant to sync user settings.
 let currentWidth = 200
+let saltUrls =
+  app.extensionManager.setting.get('mtb.io-sidebar.salt_urls') || false
+let targetWidth =
+  app.extensionManager.setting.get('mtb.io-sidebar.img-size') || 512
 let currentMode = 'input'
 let subfolder = ''
 let currentSort = 'None'
 
 const IMAGE_NODES = ['LoadImage', 'VHS_LoadImagePath']
 const VIDEO_NODES = ['VHS_LoadVideo']
+const PROCESSED_PROMPT_IDS = new Set()
 
 const updateImage = (node, image) => {
   if (IMAGE_NODES.includes(node.type)) {
@@ -38,7 +48,78 @@ const updateImage = (node, image) => {
   }
 }
 
-const getImgsFromUrls = (urls, target) => {
+/**
+ * Converts a result item to a request url.
+ * @param {ResultItem} resultItem
+ * @returns {string} - The request URL.
+ */
+const resultItemToQuery = (resultItem) => {
+  const res = [
+    `/mtb/view?filename=${resultItem.filename}`,
+    `type=${resultItem.type}`,
+    `subfolder=${resultItem.subfolder}`,
+    'preview=',
+  ]
+  if (targetWidth > 0) {
+    res.splice(1, 0, `width=${targetWidth}`)
+  }
+
+  return res.join('&')
+}
+/**
+ * Retrieves the unique prompt ID from a history task item.
+ * @param {HistoryTaskItem} historyTaskItem
+ * @returns {string} - The prompt ID.
+ */
+const getPromptId = (historyTaskItem) => `${historyTaskItem.prompt[1]}`
+
+/**
+ * Process and return any new/unseen outputs from the most recent history item.
+ * @param {HistoryTaskItem} mostRecentTask - The most recent history task item.
+ * @returns {Object<string, string>} - A map of task outputs URLs.
+ */
+const getNewOutputUrls = (mostRecentTask) => {
+  if (!mostRecentTask) return
+
+  const promptId = getPromptId(mostRecentTask)
+  if (PROCESSED_PROMPT_IDS.has(promptId)) return
+
+  const urls = {}
+  for (const nodeOutputs of Object.values(mostRecentTask.outputs)) {
+    const { images, audio, animated } = nodeOutputs
+    if (images) {
+      const imageOutputs = Object.values(nodeOutputs.images)
+      imageOutputs.forEach(
+        (resultItem) =>
+          (urls[resultItem.filename] = resultItemToQuery(resultItem)),
+      )
+    }
+    // Can process `animated` and `audio` outputs here.
+  }
+
+  const foundNewOutputs = Object.keys(urls).length > 0
+  if (!foundNewOutputs) return null
+
+  PROCESSED_PROMPT_IDS.add(promptId)
+  return urls
+}
+
+/** Fetch history and update the grid with any new ouput images. */
+const updateOutputsGrid = async () => {
+  try {
+    const history = await api.getHistory(/** maxSize: */ 1)
+    const mostRcentTask = history.History[0]
+    const newUrls = getNewOutputUrls(mostRcentTask)
+    if (newUrls) {
+      const imgGrid = document.querySelector('.mtb_img_grid')
+      getImgsFromUrls(newUrls, imgGrid, { prepend: true })
+    }
+  } catch (error) {
+    console.error('Error fetching history:', error)
+  }
+}
+
+const getImgsFromUrls = (urls, target, options = { prepend: false }) => {
   const imgs = []
   if (urls === undefined) {
     return imgs
@@ -123,7 +204,8 @@ const getImgsFromUrls = (urls, target) => {
     imgs.push(a)
   }
   if (target !== undefined) {
-    target.append(...imgs)
+    if (options.prepend) target.prepend(...imgs)
+    else target.append(...imgs)
   }
   return imgs
 }
@@ -138,7 +220,7 @@ const getUrls = async (subfolder) => {
   if (currentMode === 'video') {
     const output = await shared.runAction(
       'getUserVideos',
-      256,
+      targetWidth,
       count,
       offset,
       currentSort,
@@ -148,11 +230,13 @@ const getUrls = async (subfolder) => {
   const output = await shared.runAction(
     'getUserImages',
     currentMode,
+    targetWidth,
     count,
     offset,
     currentSort,
     false,
     subfolder,
+    saltUrls,
   )
   return output || {}
 }
@@ -165,55 +249,110 @@ if (window?.__COMFYUI_FRONTEND_VERSION__) {
 
   const sidebar_extension = {
     name: 'mtb.io-sidebar',
-    // init: async () => {
-    //   try {
-    //     const res = await api.fetchApi('/mtb/server-info')
-    //     const msg = await res.json()
-    //     exposed = msg.exposed
-    //   } catch (e) {
-    //     console.error('Error:', e)
-    //   }
-    // },
-    init: () => {
-      let handle
-      const version = window?.__COMFYUI_FRONTEND_VERSION__
-      console.log(`%c ${version}`, 'background: orange; color: white;')
-
-      ensureMTBStyles()
-
-      app.ui.settings.addSetting({
+    settings: [
+      {
         id: 'mtb.io-sidebar.count',
         category: ['mtb', 'Input & Output Sidebar', 'count'],
-
         name: 'Number of images to fetch',
         type: 'number',
         defaultValue: 1000,
-
         tooltip:
           "This setting affects the input/output sidebar to determine how many images to fetch per pagination (pagination is not yet supported so for now it's the static total)",
-        attrs: {
-          style: {
-            // fontFamily: 'monospace',
-          },
+      },
+      {
+        id: 'mtb.io-sidebar.salt_urls',
+        category: ['mtb', 'Input & Output Sidebar', 'salt_urls'],
+        name: 'Salt URLs',
+        type: 'boolean',
+        defaultValue: false,
+        onChange: (n, o) => {
+          saltUrls = n
         },
-      })
-
-      app.ui.settings.addSetting({
+        tooltip:
+          'Adds a random query parameter to every urls to always invalidate caching.',
+      },
+      {
         id: 'mtb.io-sidebar.img-size',
         category: ['mtb', 'Input & Output Sidebar', 'img-size'],
 
-        name: 'Resolution of the images',
-        type: 'number',
+        name: 'Resize width of shown images',
         defaultValue: 512,
+        type: (name, setter, value, attrs) => {
+          targetWidth = value
+          const container = mtb_ui.makeElement('div', {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          })
 
-        tooltip: "It's recommended to keep it at 512px",
-        attrs: {
-          style: {
-            // fontFamily: 'monospace',
-          },
+          console.log({ name, setter, value, attrs })
+
+          const baseId = name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()
+          const checkboxId = `${baseId}-checkbox`
+          const numberInputId = `${baseId}-number`
+
+          const isCheckedInitially = value !== -1
+
+          // TODO: better way to get defaultValue?
+          const defaultValue = 512
+          const initialNumberValue = isCheckedInitially ? value : defaultValue
+
+          console.log('recreate')
+          const checkbox = mtb_ui.makeElement(
+            // harder to match styles (.p-toggleswitch-input)
+            // since it uses a div synced to the input...
+            'input',
+            {},
+            container,
+          )
+          checkbox.type = 'checkbox'
+          checkbox.id = checkboxId
+          checkbox.checked = isCheckedInitially
+
+          const numberInput = mtb_ui.makeElement(
+            'input.p-inputtext',
+            {},
+            container,
+          )
+          numberInput.type = 'number'
+          numberInput.id = numberInputId
+          numberInput.value = initialNumberValue
+          numberInput.disabled = !isCheckedInitially
+          numberInput.min = 128
+
+          checkbox.addEventListener('change', () => {
+            let valToSet = -1
+            if (checkbox.checked) {
+              numberInput.disabled = false
+
+              valToSet = Number.parseInt(numberInput.value, 10)
+              if (Number.isNaN(valToSet) || valToSet < numberInput.min) {
+                valToSet = defaultValue
+                numberInput.value = valToSet
+              }
+            } else {
+              numberInput.disabled = true
+            }
+            setter(valToSet)
+          })
+
+          numberInput.addEventListener('input', () => {
+            if (checkbox.checked) {
+              const numValue = Number.parseInt(numberInput.value, 10)
+              if (!Number.isNaN(numValue) && numberInput.value !== '') {
+                setter(numValue)
+              }
+            }
+          })
+
+          return container
         },
-      })
-      app.ui.settings.addSetting({
+
+        tooltip:
+          "If browsing large folders it's recommended to use this to avoid overflow/crash of the webpage. Image will get resized to this target width on the server before being sent to the client.",
+      },
+
+      {
         id: 'mtb.io-sidebar.sort',
         category: ['mtb', 'Input & Output Sidebar', 'sort'],
         name: 'Default sort mode',
@@ -233,7 +372,39 @@ if (window?.__COMFYUI_FRONTEND_VERSION__) {
           'Name',
           'Name-Reverse',
         ],
-      })
+      },
+      {
+        id: 'mtb.io-sidebar.notice',
+        category: ['mtb', 'Input & Output Sidebar', 'sort'],
+        name: ' ',
+
+        type: (name, setter, value, attrs) => {
+          const container = mtb_ui.makeElement('div')
+          const notice =
+            '## Important\nIf you make **any** edits here you need to toggle off and back on the sidebar for it to take effect.'
+
+          if (window.MTB?.mdParser) {
+            MTB.mdParser.parse(notice).then((e) => {
+              container.innerHTML = e
+            })
+          } else {
+            shared.ensureMarkdownParser((p) => {
+              p.parse(notice).then((e) => {
+                container.innerHTML = e
+              })
+            })
+          }
+          return container
+        },
+      },
+    ],
+
+    init: () => {
+      let handle
+      const version = window?.__COMFYUI_FRONTEND_VERSION__
+      console.log(`%c ${version}`, 'background: orange; color: white;')
+
+      ensureMTBStyles()
 
       app.extensionManager.registerSidebarTab({
         id: 'mtb-inputs-outputs',
@@ -324,11 +495,16 @@ if (window?.__COMFYUI_FRONTEND_VERSION__) {
             }
           })
           handle = renderSidebar(el, cont, [selector, imgGrid, imgTools])
+          app.api.addEventListener('status', async () => {
+            if (currentMode !== 'output') return
+            updateOutputsGrid()
+          })
         },
         destroy: () => {
           if (handle) {
             handle.unregister()
             handle = undefined
+            app.api.removeEventListener('status')
           }
         },
       })

@@ -35,7 +35,7 @@ class MTB_ImageRemoveBackgroundRembg:
                 ),
                 "bgcolor": (
                     "COLOR",
-                    {"default": "#000000"},
+                    {"default": "#000000","widgetType": "MTB_COLOR"},
                 ),
             },
         }

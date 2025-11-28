@@ -25,6 +25,19 @@ export function makeUUID() {
   return uuid
 }
 
+// - basic debounce decorator
+export function debounce(func, delay) {
+  let timeout
+  let debounced = function (...args) {
+    clearTimeout(timeout)
+    timeout = setTimeout(() => func.apply(this, args), delay)
+  }
+  debounced.cancel = () => {
+    clearTimeout(timeout)
+  }
+  return debounced
+}
+
 //- local storage manager
 export class LocalStorageManager {
   constructor(namespace) {
@@ -195,6 +208,7 @@ export function hideWidgetForGood(node, widget, suffix = '') {
   widget.origComputeSize = widget.computeSize
   widget.origSerializeValue = widget.serializeValue
   widget.computeSize = () => [0, -4] // -4 is due to the gap litegraph adds between widgets automatically
+  widget.hidden = true
   widget.type = CONVERTED_TYPE + suffix
   // widget.serializeValue = () => {
   //     // Prevent serializing the widget if we have no input linked
@@ -621,21 +635,21 @@ function getBrightness(rgbObj) {
 export function calculateTotalChildrenHeight(parentElement) {
   let totalHeight = 0
 
+  if (!parentElement || !parentElement.children) {
+    return 0
+  }
+
   for (const child of parentElement.children) {
     const style = window.getComputedStyle(child)
 
-    // Get height as an integer (without 'px')
-    const height = Number.parseInt(style.height, 10)
+    const height = Number.parseFloat(style.height)
+    const marginTop = Number.parseFloat(style.marginTop)
+    const marginBottom = Number.parseFloat(style.marginBottom)
 
-    // Get vertical margin as integers
-    const marginTop = Number.parseInt(style.marginTop, 10)
-    const marginBottom = Number.parseInt(style.marginBottom, 10)
-
-    // Sum up height and vertical margins
     totalHeight += height + marginTop + marginBottom
   }
 
-  return totalHeight
+  return Math.ceil(totalHeight)
 }
 
 export const loadScript = (
@@ -646,13 +660,15 @@ export const loadScript = (
   return new Promise((resolve, reject) => {
     try {
       // Check if the script already exists
-      const existingScript = document.querySelector(`script[src="${FILE_URL}"]`)
-      if (existingScript) {
-        resolve({ status: true, message: 'Script already loaded' })
+      let scriptEle = document.querySelector(`script[src="${FILE_URL}"]`)
+      if (scriptEle) {
+        scriptEle.addEventListener('load', (_ev) => {
+          resolve({ status: true })
+        })
         return
       }
 
-      const scriptEle = document.createElement('script')
+      scriptEle = document.createElement('script')
       scriptEle.type = type
       scriptEle.async = async
       scriptEle.src = FILE_URL
@@ -671,6 +687,8 @@ export const loadScript = (
       document.body.appendChild(scriptEle)
     } catch (error) {
       reject(error)
+    } finally {
+      infoLogger(`Finally loaded script: ${FILE_URL}`)
     }
   })
 }
@@ -784,12 +802,10 @@ function loadParser(shiki) {
 
 export const ensureMarkdownParser = async (callback) => {
   infoLogger('Ensuring md parser')
-  let use_shiki = false
-  try {
-    use_shiki = await api.getSetting('mtb.Use Shiki')
-  } catch (e) {
-    console.warn('Option not available yet', e)
-  }
+  const use_shiki = app.extensionManager.setting.get(
+    'mtb.noteplus.use-shiki',
+    false,
+  )
 
   if (window.MTB?.mdParser) {
     infoLogger('Markdown parser found')
@@ -814,8 +830,7 @@ export const ensureMarkdownParser = async (callback) => {
     callbackQueue.push(callback)
   }
 
-  await parserPromise
-  await parserPromise
+  await await parserPromise
 
   return window.MTB.mdParser
 }
@@ -1153,59 +1168,4 @@ export const setServerInfo = async (opts) => {
   })
 }
 
-// #endregion
-
-// #region Authoring API / graph utilities
-export const getAPIInputs = () => {
-  const inputs = {}
-  let counter = 1
-  for (const node of getNodes(true)) {
-    const widgets = node.widgets
-
-    if (node.properties.mtb_api && node.properties.useAPI) {
-      if (node.properties.mtb_api.inputs) {
-        for (const currentName in node.properties.mtb_api.inputs) {
-          const current = node.properties.mtb_api.inputs[currentName]
-          if (current.enabled) {
-            const inputName = current.name || currentName
-            const widget = widgets.find((w) => w.name === currentName)
-            if (!widget) continue
-            if (!(inputName in inputs)) {
-              inputs[inputName] = {
-                ...current,
-                id: counter,
-                name: inputName,
-                type: current.type,
-                node_id: node.id,
-                widgets: [],
-              }
-            }
-            inputs[inputName].widgets.push(widget)
-            counter = counter + 1
-          }
-        }
-      }
-    }
-  }
-  return inputs
-}
-
-export const getNodes = (skip_unused) => {
-  const nodes = []
-  for (const outerNode of app.graph.computeExecutionOrder(false)) {
-    const skipNode =
-      (outerNode.mode === 2 || outerNode.mode === 4) && skip_unused
-    const innerNodes =
-      !skipNode && outerNode.getInnerNodes
-        ? outerNode.getInnerNodes()
-        : [outerNode]
-    for (const node of innerNodes) {
-      if ((node.mode === 2 || node.mode === 4) && skip_unused) {
-        continue
-      }
-      nodes.push(node)
-    }
-  }
-  return nodes
-}
 // #endregion

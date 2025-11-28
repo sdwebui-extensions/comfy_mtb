@@ -1,10 +1,13 @@
 // web/note_plus.constants.js
 
-export const DEFAULT_CSS = ''
+export const DEFAULT_CSS = `/** here you can write css**/
+h1 {
+    color: whitesmoke;
+}`
 export const DEFAULT_HTML = `<p style='color:red;font-family:monospace'>
     Note+
 </p>`
-export const DEFAULT_MD = '## Note+'
+export const DEFAULT_MD = '# 📝 Note+'
 export const DEFAULT_MODE = 'markdown'
 export const DEFAULT_THEME = 'one_dark'
 
@@ -55,58 +58,57 @@ We also support github callout:
 `
 
 export const THEMES = [
-	'ambiance',
-	'chaos',
-	'chrome',
-	'cloud9_day',
-	'cloud9_night',
-	'cloud9_night_low_color',
-	'cloud_editor',
-	'cloud_editor_dark',
-	'clouds',
-	'clouds_midnight',
-	'cobalt',
-	'crimson_editor',
-	'dawn',
-	'dracula',
-	'dreamweaver',
-	'eclipse',
-	'github',
-	'github_dark',
-	'gob',
-	'gruvbox',
-	'gruvbox_dark_hard',
-	'gruvbox_light_hard',
-	'idle_fingers',
-	'iplastic',
-	'katzenmilch',
-	'kr_theme',
-	'kuroir',
-	'merbivore',
-	'merbivore_soft',
-	'mono_industrial',
-	'monokai',
-	'nord_dark',
-	'one_dark',
-	'pastel_on_dark',
-	'solarized_dark',
-	'solarized_light',
-	'sqlserver',
-	'terminal',
-	'textmate',
-	'tomorrow',
-	'tomorrow_night',
-	'tomorrow_night_blue',
-	'tomorrow_night_bright',
-	'tomorrow_night_eighties',
-	'twilight',
-	'vibrant_ink',
-	'vscode',
+  'ambiance',
+  'chaos',
+  'chrome',
+  'cloud9_day',
+  'cloud9_night',
+  'cloud9_night_low_color',
+  'cloud_editor',
+  'cloud_editor_dark',
+  'clouds',
+  'clouds_midnight',
+  'cobalt',
+  'crimson_editor',
+  'dawn',
+  'dracula',
+  'dreamweaver',
+  'eclipse',
+  'github',
+  'github_dark',
+  'gob',
+  'gruvbox',
+  'gruvbox_dark_hard',
+  'gruvbox_light_hard',
+  'idle_fingers',
+  'iplastic',
+  'katzenmilch',
+  'kr_theme',
+  'kuroir',
+  'merbivore',
+  'merbivore_soft',
+  'mono_industrial',
+  'monokai',
+  'nord_dark',
+  'one_dark',
+  'pastel_on_dark',
+  'solarized_dark',
+  'solarized_light',
+  'sqlserver',
+  'terminal',
+  'textmate',
+  'tomorrow',
+  'tomorrow_night',
+  'tomorrow_night_blue',
+  'tomorrow_night_bright',
+  'tomorrow_night_eighties',
+  'twilight',
+  'vibrant_ink',
+  'vscode',
 ]
 
 export const CSS_RESET = `
 * {
-  font-family: monospace;
   line-height: 1.25em;
 }
 .shiki{
@@ -116,6 +118,8 @@ export const CSS_RESET = `
 .markdown-callout-title {
     .octicon{
         fill:white;
+        width:29px;
+        height:29px;
     }
 	/* background: var(--current-color); */
 	color: var(--current-color);
@@ -124,6 +128,8 @@ export const CSS_RESET = `
 	/* border-start-start-radius: var(--radius); */
 	padding: 0.5em;
 	padding-inline-start: 1em;
+  display: flex;
+  align-items: center;
 }
 .markdown-callout-content {
 	padding: 1em;
@@ -136,7 +142,12 @@ export const CSS_RESET = `
 	border-left: 3px solid var(--current-color);
 	margin-bottom: 1em;
 	margin-top: 1em;
+
 }
+.markdown-callout p:nth-child(2) {
+    padding:1em;
+  }
+
 
 .markdown-callout-tip {
 	--text-color: whitesmoke;
@@ -164,8 +175,9 @@ export const CSS_RESET = `
   flex-direction:column;
   align-items: flex-start;
   width:95%;
-  margin-left: 20px;
-  margin-top:20px;
+  /*margin-left: 20px;*/
+  /*margin-top:20px;*/
+
   /*background-color: rgba(255,0,0,0.5)!important;*/
 }
 

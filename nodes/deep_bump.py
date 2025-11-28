@@ -2,12 +2,16 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import torch
+
+# torch must be imported prior to onnx for the CUDAProvider.
+import torch  # isort:skip
+import onnxruntime as ort
 from PIL import Image
 
 from ..errors import ModelNotFound
 from ..log import mklog
 from ..utils import (
+    download_model,
     get_model_path,
     tensor2pil,
     tiles_infer,
@@ -23,7 +27,12 @@ ort = None
 
 # - COLOR to NORMALS
 def color_to_normals(
-    color_img, overlap, progress_callback, *, save_temp=False
+    color_img,
+    overlap,
+    progress_callback,
+    *,
+    save_temp=False,
+    auto_download=False,
 ):
     """Compute a normal map from the given color map.
 
@@ -355,6 +364,9 @@ class MTB_DeepBump:
                 ),
                 "normals_to_height_seamless": ("BOOLEAN", {"default": True}),
             },
+            "optional": {
+                "auto_download": ("BOOLEAN", {"default": True}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -370,6 +382,7 @@ class MTB_DeepBump:
         color_to_normals_overlap="SMALL",
         normals_to_curvature_blur_radius="SMALL",
         normals_to_height_seamless=True,
+        auto_download=False,
     ):
         images = tensor2pil(image)
         out_images = []
@@ -384,7 +397,10 @@ class MTB_DeepBump:
             # Apply processing
             if mode == "Color to Normals":
                 out_img = color_to_normals(
-                    in_img, color_to_normals_overlap, None
+                    in_img,
+                    color_to_normals_overlap,
+                    None,
+                    auto_download=auto_download,
                 )
             if mode == "Normals to Curvature":
                 out_img = normals_to_curvature(
